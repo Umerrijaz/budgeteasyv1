@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "budgeteasy",
+  title: "Budgeteasy",
   description: "manage your budget easily",
 };
 
@@ -26,7 +26,7 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      data-theme="synthwave"
+      data-theme="retro"
     >
       <body className="min-h-full flex flex-col bg-base-100 text-base-content">{children}</body>
     </html>

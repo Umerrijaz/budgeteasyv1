@@ -16,11 +16,11 @@ export default function Hero() {
   return (
     // Pillar 5: bg-base-100 is applied to a full-width outer wrapper so the
     // background stretches edge-to-edge. The inner div handles max-width.
-    <section className="w-full bg-base-100">
-      <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-center gap-16 lg:gap-20 px-8 py-8 lg:py-20">
+    <section className="hero bg-base-100 py-8 lg:py-20">
+      <div className="hero-content flex-col lg:flex-row max-w-7xl w-full gap-16 lg:gap-20 px-8">
 
         {/* ── Left column: copy + CTA ──────────────────────────────────────── */}
-        <div className="flex flex-col gap-10 lg:gap-14 items-center justify-center text-center lg:text-left lg:items-start">
+        <div className="flex flex-col gap-10 lg:gap-14 items-center justify-center text-center lg:text-left lg:items-start lg:w-1/2">
 
 
           {/* SEO: one <h1> per page, keyword-rich, above the fold */}
@@ -46,7 +46,7 @@ export default function Hero() {
         </div>
 
         {/* ── Right column: product screenshot ─────────────────────────────── */}
-        <div className="lg:w-full">
+        <div className="lg:w-1/2 w-full">
           <Image
             src="https://images.unsplash.com/photo-1571171637578-41bc2dd41cd2?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=3540&q=80"
             alt={`${config.appName} product dashboard screenshot`}
