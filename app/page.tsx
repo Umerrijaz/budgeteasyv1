@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import Problem from "@/components/Problem";
+import FeaturesAccordion from "@/components/FeaturesAccordion";
 import Pricing from "@/components/Pricing";
 import config from "@/config";
 
@@ -11,6 +12,7 @@ export default function Home() {
       <main>
         <Hero />
         <Problem {...config.problem} />
+        <FeaturesAccordion {...config.features} />
         <Pricing tiers={config.pricing} />
       </main>
     </>
