@@ -1,12 +1,14 @@
 import { PricingTier } from "@/components/Pricing";
 import { ProblemProps } from "@/components/Problem";
 import { FeaturesAccordionProps } from "@/components/FeaturesAccordion";
+import { FAQProps } from "@/components/FAQ";
 
 interface ConfigProps {
   appName: string;
   problem: ProblemProps;
   features: FeaturesAccordionProps;
   pricing: PricingTier[];
+  faqs: FAQProps;
 }
 
 const config: ConfigProps = {
@@ -100,6 +102,39 @@ const config: ConfigProps = {
       isPopular: true,
     },
   ],
+  faqs: {
+    title: "Frequently Asked Questions",
+    subtitle: "FAQ",
+    items: [
+      {
+        id: "security",
+        question: "Is my bank data secure?",
+        answer: (
+          <p>
+            Yes. We use Plaid to connect to your bank accounts with bank-level 256-bit encryption. We never store your login credentials, and we have read-only access to your transactions.
+          </p>
+        ),
+      },
+      {
+        id: "devices",
+        question: "Can I use BudgetEasy on multiple devices?",
+        answer: (
+          <p>
+            Absolutely! BudgetEasy syncs seamlessly across your phone, tablet, and computer in real-time.
+          </p>
+        ),
+      },
+      {
+        id: "refund",
+        question: "Can I get a refund?",
+        answer: (
+          <p>
+            Yes! If you aren't satisfied, you can request a full refund within 7 days of your purchase. Just reach out to us by email.
+          </p>
+        ),
+      },
+    ],
+  },
 };
 
 export default config;

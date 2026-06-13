@@ -16,7 +16,7 @@ export interface PricingProps {
 
 export default function Pricing({ tiers }: PricingProps) {
   return (
-    <section className="py-24 bg-base-200" id="pricing">
+    <section className="pt-24 pb-12 bg-base-200" id="pricing">
       <div className="max-w-7xl mx-auto px-8">
         <div className="text-center mb-16">
           <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-base-content mb-4">
