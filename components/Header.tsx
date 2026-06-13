@@ -12,7 +12,7 @@ const links: { href: string; label: string }[] = [
 ];
 
 // The CTA button — typed as ReactNode so it can be a component, text, or null
-const cta: ReactNode = <ButtonSignin />;
+const cta: ReactNode = <ButtonSignin extraStyle="px-8" />;
 
 export default function Header() {
   return (
