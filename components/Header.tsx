@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import ButtonSignin from "./ButtonSignin";
 import config from "@/config";
@@ -10,7 +10,7 @@ const links: { href: string; label: string; }[] = [
   { href: "/#faq", label: "FAQ" },
 ];
 
-const cta: JSX.Element = <ButtonSignin />;
+const cta: ReactNode = <ButtonSignin />;
 
 export default function Header() {
   return (
