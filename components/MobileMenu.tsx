@@ -17,7 +17,7 @@ export default function MobileMenu({ links, cta }: MobileMenuProps) {
 
   return (
     // Only visible on small screens — hidden on large screens
-    <div className="flex lg:hidden drawer drawer-end z-50">
+    <div className="lg:hidden drawer drawer-end z-50 w-auto ml-auto">
       
       {/* Hidden checkbox to toggle the drawer */}
       <input 
@@ -84,8 +84,7 @@ export default function MobileMenu({ links, cta }: MobileMenuProps) {
             ))}
           </ul>
 
-          {/* Divider + CTA button at the bottom */}
-          <div className="divider mx-4 my-0 mt-auto" />
+          {/* CTA button at the bottom */}
           <div className="p-4">{cta}</div>
 
         </div>
