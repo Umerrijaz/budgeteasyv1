@@ -32,7 +32,7 @@ export default function Pricing({ tiers }: PricingProps) {
             <div
               key={tier.id}
               className={`card relative bg-base-100 shadow-xl w-full lg:w-96 border-2 transition duration-300 hover:-translate-y-2 flex flex-col ${tier.isPopular
-                ? "border-primary shadow-primary/20 lg:scale-105 z-10"
+                ? "border-primary shadow-primary/20 lg:scale-105 lg:origin-bottom z-10"
                 : "border-transparent"
                 }`}
             >
@@ -58,8 +58,8 @@ export default function Pricing({ tiers }: PricingProps) {
                 </div>
 
                 <ul className="space-y-4 mb-8">
-                  {tier.features.map((feature, i) => (
-                    <li key={i} className="flex items-start gap-3">
+                  {tier.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-3">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
                         className="h-6 w-6 text-success shrink-0"
