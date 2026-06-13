@@ -1,12 +1,23 @@
 import { PricingTier } from "@/components/Pricing";
+import { ProblemProps } from "@/components/Problem";
 
 interface ConfigProps {
   appName: string;
+  problem: ProblemProps;
   pricing: PricingTier[];
 }
 
 const config: ConfigProps = {
   appName: "BudgetEasy",
+  problem: {
+    title: "80% of people fail to save money because they don't track expenses",
+    description: "Spreadsheets, forgotten receipts, mental math... There's so much going on. Managing finances shouldn't feel like a second job.",
+    steps: [
+      { id: "build-spreadsheet", emoji: "🤯", text: "Try to build a spreadsheet" },
+      { id: "struggle-update", emoji: "😮‍💨", text: "Struggle to find time to update it" },
+      { id: "give-up", emoji: "💸", text: "Give up and overspend" },
+    ],
+  },
   pricing: [
     {
       id: "plus",
