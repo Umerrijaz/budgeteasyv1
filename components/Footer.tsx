@@ -19,7 +19,7 @@ const LinkColumn = ({
   links,
 }: {
   title: string;
-  links: FooterLink[];
+  links: NavigationLink[];
 }) => (
   <div className="lg:w-1/3 md:w-1/2 w-full px-4">
     <p className="footer-title font-semibold text-base-content tracking-widest text-sm md:text-left mb-3">

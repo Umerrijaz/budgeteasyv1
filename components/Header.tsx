@@ -25,7 +25,7 @@ export default function Header() {
         <ul className="menu menu-horizontal px-1 gap-2">
           {config.headerLinks.map((link) => (
             <li key={link.href}>
-              <Link href={link.href} title={link.label} className="font-medium">
+              <Link href={link.href} title={link.label} className="font-medium text-lg">
                 {link.label}
               </Link>
             </li>

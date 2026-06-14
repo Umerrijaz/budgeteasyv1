@@ -167,7 +167,7 @@ const config: ConfigProps = {
     ],
   },
   headerLinks: [
-    { href: "/#pricing", label: "Prici" },
+    { href: "/#pricing", label: "Pricing" },
     { href: "/#testimonials", label: "Reviews" },
     { href: "/#faq", label: "FAQ" },
   ],

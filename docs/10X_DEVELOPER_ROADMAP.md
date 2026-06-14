@@ -17,7 +17,8 @@
 7. [The TypeScript Contract System — Why AI Loves This Codebase](#7-the-typescript-contract-system)
 8. [The Bridge to Convex — Where the Config Pattern Evolves](#8-the-bridge-to-convex)
 9. [The 10x AI Workflow — How You Will Actually Build After This Week](#9-the-10x-ai-workflow)
-10. [Next.js Best Practices Checklist](#10-nextjs-best-practices-checklist)
+10. [The AI Context Wall — How to Survive Week 3](#10-the-ai-context-wall)
+11. [Next.js Best Practices Checklist](#11-nextjs-best-practices-checklist)
 
 ---
 
@@ -764,7 +765,32 @@ Without this mental model: 2-4 hours of fumbling and debugging.
 
 ---
 
-## 10. Next.js Best Practices Checklist
+## 10. The AI Context Wall — How to Survive Week 3
+
+The biggest trap solo developers fall into with AI: **Day one, your AI knows everything. Week three, it forgets.**
+
+As your codebase grows, the AI loses the plot. It starts suggesting patterns you abandoned days ago. It forgets your tech stack. It overwrites your customized UI components with generic code. 
+
+**The Fix:** Keep a single `CONTEXT.md` file in the root of your project. 
+
+Paste the contents of this file at the start of *every single AI session* (or set it as a permanent instruction if your AI tool supports it). It should be short and evolve as you build. It acts as the permanent memory for your AI assistant.
+
+### Example `CONTEXT.md`
+
+```markdown
+# Project Context: BudgetEasy
+- **Stack:** Next.js (App Router), React, Tailwind CSS, DaisyUI, Convex.
+- **Styling Rules:** Use semantic DaisyUI tokens (`bg-base-100`, `text-primary`) only. Never use hardcoded Tailwind hex colors.
+- **Architecture:** We follow strict Separation of Concerns. UI components (in `/components`) should be "dumb" and receive data via props. 
+- **Data Flow:** All static data originates from `config.tsx`. When building Convex queries, wrapper components fetch data and pass it down as props.
+- **Server/Client:** Default to Server Components. Only use `"use client"` when state (`useState`), browser APIs, or interactivity is explicitly required.
+```
+
+If you do this, your AI will code like a Senior Dev on Week 3, not a confused intern.
+
+---
+
+## 11. Next.js Best Practices Checklist
 
 Use this as a quick reference when building or reviewing AI-generated code.
 
