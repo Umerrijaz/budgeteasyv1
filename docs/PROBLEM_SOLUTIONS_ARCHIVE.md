@@ -68,3 +68,10 @@ This document serves as a historical record of the problems we faced while build
 - The `<html>` tag had the `h-full` class. When the `<html>` element's height is constrained to 100%, the browser gets confused about the scrolling container, which breaks CSS smooth scrolling.
 - We removed `h-full` from the `<html>` tag and changed the `<body>` tag to use `min-h-screen` instead.
 - *Key Takeaway:* CSS smooth scrolling requires the browser to correctly identify the document as the scroll container. Be careful when applying height constraints like `h-full` to the root `<html>` element!
+
+## 11. Code Pushed to GitHub Not Reflecting on Vercel (The Synthwave Theme Issue)
+**Problem:** You changed the theme to `synthwave`, pushed the code to GitHub (`git push origin main`), but the live Vercel site was still showing the old light theme.
+**Solution:** 
+- The Vercel project was never properly linked to the GitHub repository in the Vercel Dashboard, so Vercel didn't know it needed to trigger a rebuild when new code was pushed to GitHub.
+- We temporarily bypassed this by running a manual production deployment from the terminal (`npx vercel --prod --yes`).
+- *Key Takeaway:* If your live site isn't updating after a `git push`, your repository isn't linked. Go to your Vercel Dashboard -> Settings -> Git to connect your GitHub repo for automatic deployments.
