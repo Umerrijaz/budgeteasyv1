@@ -1,5 +1,8 @@
 # Project Context: BudgetEasy
 
+> **Why is this file in the root directory and not in `/docs`?**
+> Modern AI coding assistants (like Cursor, GitHub Copilot, and Claude) automatically scan the project's root folder for a `CONTEXT.md` file to use as their underlying system prompt. If this file is moved to `/docs`, the AI will not detect it automatically, and it will lose its memory of your architecture across sessions. **Do not move this file!**
+
 - **Stack:** Next.js (App Router), React, Tailwind CSS, DaisyUI, Convex.
 - **Styling Rules:** Use semantic DaisyUI tokens (`bg-base-100`, `text-primary`) only. Never use hardcoded Tailwind hex colors unless specifically requested.
 - **Architecture:** We follow strict Separation of Concerns. UI components (in `/components`) should be "dumb" and receive data via props. 
