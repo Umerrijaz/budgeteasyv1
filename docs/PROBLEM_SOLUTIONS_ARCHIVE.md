@@ -75,3 +75,33 @@ This document serves as a historical record of the problems we faced while build
 - The Vercel project was never properly linked to the GitHub repository in the Vercel Dashboard, so Vercel didn't know it needed to trigger a rebuild when new code was pushed to GitHub.
 - We temporarily bypassed this by running a manual production deployment from the terminal (`npx vercel --prod --yes`).
 - *Key Takeaway:* If your live site isn't updating after a `git push`, your repository isn't linked. Go to your Vercel Dashboard -> Settings -> Git to connect your GitHub repo for automatic deployments.
+
+## 12. TypeScript: `HeroProps` Not a Named Export from `@/config`
+**Problem:** `Hero.tsx` used a named import `{ HeroProps } from "@/config"`, but `config.tsx` never declared or exported an interface called `HeroProps`. TypeScript reported:
+```
+Module '"@/config"' has no exported member 'HeroProps'.
+Did you mean to use 'import HeroProps from "@/config"' instead?
+```
+**Root Cause:** The `config.tsx` file only had `export default config`. It had no named exports for any TypeScript interfaces, so `{ HeroProps }` could not be resolved.
+**Solution:**
+- Defined and exported `HeroProps` directly from `config.tsx` as a named export:
+  ```ts
+  export interface HeroProps {
+    title: string;
+    description: string;
+    image: { src: string; alt: string };
+  }
+  ```
+- No changes were needed in `Hero.tsx` — the named import `{ HeroProps } from "@/config"` was already the correct pattern.
+- *Key Takeaway:* If you want to share a TypeScript interface from a file that uses `export default`, you must also explicitly add `export interface` (or `export type`) for that interface. A default export does **not** make named exports available automatically.
+
+## 13. TypeScript: `Property 'hero' Does Not Exist on Type 'ConfigProps'`
+**Problem:** `page.tsx` spread `config.hero` into the `<Hero />` component, but the `ConfigProps` interface in `config.tsx` had no `hero` field. TypeScript reported:
+```
+Property 'hero' does not exist on type 'ConfigProps'.
+```
+**Root Cause:** The `Hero` component and its `<Hero {...config.hero} />` usage in `page.tsx` were added, but the `ConfigProps` interface was never updated to include a `hero` property, and the `config` object had no `hero` data.
+**Solution:**
+1. Added `hero: HeroProps` to the `ConfigProps` interface in `config.tsx`.
+2. Added a `hero` entry to the `config` object with `title`, `description`, and `image` fields.
+- *Key Takeaway:* When you add a new component that is driven by `config.tsx`, you must update **both** the `ConfigProps` interface (so TypeScript is satisfied) **and** the actual `config` object (so the data exists at runtime). Forgetting either one will cause an error.

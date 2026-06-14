@@ -13,7 +13,7 @@ export default function Home() {
     <>
       <Header />
       <main>
-        <Hero />
+        <Hero {...config.hero} />
         <Problem {...config.problem} />
         <FeaturesAccordion {...config.features} />
         <Pricing tiers={config.pricing} />

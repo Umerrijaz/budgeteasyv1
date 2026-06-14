@@ -3,6 +3,15 @@ import { ProblemProps } from "@/components/Problem";
 import { FeaturesAccordionProps } from "@/components/FeaturesAccordion";
 import { FAQProps } from "@/components/FAQ";
 
+export interface HeroProps {
+  title: string;
+  description: string;
+  image: {
+    src: string;
+    alt: string;
+  };
+}
+
 export interface NavigationLink {
   href: string;
   label: string;
@@ -16,6 +25,7 @@ export interface FooterColumn {
 
 interface ConfigProps {
   appName: string;
+  hero: HeroProps;
   problem: ProblemProps;
   features: FeaturesAccordionProps;
   pricing: PricingTier[];
@@ -26,6 +36,14 @@ interface ConfigProps {
 
 const config: ConfigProps = {
   appName: "BudgetEasy",
+  hero: {
+    title: "The easiest way to take control of your budget",
+    description: "Track expenses, set budgets, and hit your savings goals — all in one beautifully simple app. No spreadsheets required.",
+    image: {
+      src: "https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?auto=format&fit=crop&w=500&q=80",
+      alt: "BudgetEasy dashboard showing a budget overview",
+    },
+  },
   problem: {
     title: "80% of people fail to save money because they don't track expenses",
     description: "Spreadsheets, forgotten receipts, mental math... There's so much going on. Managing finances shouldn't feel like a second job.",
@@ -149,7 +167,7 @@ const config: ConfigProps = {
     ],
   },
   headerLinks: [
-    { href: "/#pricing", label: "Pricing" },
+    { href: "/#pricing", label: "Prici" },
     { href: "/#testimonials", label: "Reviews" },
     { href: "/#faq", label: "FAQ" },
   ],
