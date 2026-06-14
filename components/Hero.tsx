@@ -16,7 +16,7 @@ export default function Hero() {
   return (
     // Pillar 5: bg-base-100 is applied to a full-width outer wrapper so the
     // background stretches edge-to-edge. The inner div handles max-width.
-    <section className="hero bg-base-100 py-8 lg:py-20">
+    <section className="hero bg-base-100 py-16 md:py-24">
       <div className="hero-content flex-col lg:flex-row max-w-7xl w-full gap-16 lg:gap-20 px-8">
 
         {/* ── Left column: copy + CTA ──────────────────────────────────────── */}

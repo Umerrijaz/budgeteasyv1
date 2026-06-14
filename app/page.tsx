@@ -4,6 +4,8 @@ import Problem from "@/components/Problem";
 import FeaturesAccordion from "@/components/FeaturesAccordion";
 import Pricing from "@/components/Pricing";
 import FAQ from "@/components/FAQ";
+import CTA from "@/components/CTA";
+import Footer from "@/components/Footer";
 import config from "@/config";
 
 export default function Home() {
@@ -16,7 +18,10 @@ export default function Home() {
         <FeaturesAccordion {...config.features} />
         <Pricing tiers={config.pricing} />
         <FAQ {...config.faqs} />
+        <CTA />
       </main>
+      <Footer />
+
     </>
   );
 }

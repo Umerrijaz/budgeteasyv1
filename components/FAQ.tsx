@@ -80,16 +80,16 @@ const FaqItem = ({ item }: { item: FAQItemData }) => {
 // --- Main Export (Pillar 3: Data flows DOWN via props) ---
 export default function FAQ({ title = "Frequently Asked Questions", subtitle = "FAQ", items }: FAQProps) {
   return (
-    <section className="bg-base-200" id="faq">
-      <div className="pt-12 pb-24 px-8 max-w-7xl mx-auto flex flex-col md:flex-row gap-4 md:gap-8">
+    <section className="bg-base-200 py-16 md:py-24" id="faq">
+      <div className="px-8 max-w-7xl mx-auto flex flex-col md:flex-row gap-4 md:gap-8">
         <div className="flex flex-col text-left basis-1/2">
-          <p className="inline-block font-semibold text-primary mb-4">{subtitle}</p>
-          <p className="sm:text-4xl text-3xl font-extrabold text-base-content">
+          <p className="inline-block text-xl font-bold text-primary mb-4 uppercase tracking-wider">{subtitle}</p>
+          <p className="md:text-5xl text-4xl font-extrabold text-base-content">
             {title}
           </p>
         </div>
 
-        <ul className="basis-1/2">
+        <ul className="basis-1/2 md:mt-6">
           {items.map((item) => (
             // Using our robust ID key instead of the fragile index 'i'
             <FaqItem key={item.id} item={item} />
