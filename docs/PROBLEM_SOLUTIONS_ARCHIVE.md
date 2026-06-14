@@ -61,3 +61,10 @@ This document serves as a historical record of the problems we faced while build
 **Solution:** 
 - Deployed the site using the Vercel CLI (`npx vercel --prod`).
 - Wrote a detailed `DEPLOYMENT.md` guide and moved it into a neatly organized `docs/` folder before pushing it to GitHub.
+
+## 10. Native Smooth Scrolling Feeling "Instant"
+**Problem:** We added the `scroll-smooth` class to the `<html>` tag to enable smooth scrolling to anchor links (like `#pricing`), but clicking the links still instantly snapped to the section.
+**Solution:** 
+- The `<html>` tag had the `h-full` class. When the `<html>` element's height is constrained to 100%, the browser gets confused about the scrolling container, which breaks CSS smooth scrolling.
+- We removed `h-full` from the `<html>` tag and changed the `<body>` tag to use `min-h-screen` instead.
+- *Key Takeaway:* CSS smooth scrolling requires the browser to correctly identify the document as the scroll container. Be careful when applying height constraints like `h-full` to the root `<html>` element!
