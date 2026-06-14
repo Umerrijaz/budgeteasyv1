@@ -11,28 +11,7 @@
 // We do not duplicate text that already exists elsewhere in the codebase.
 
 import Link from "next/link";
-import config from "@/config";
-
-// ─── Pillar 4: TypeScript Contract ───────────────────────────────────────────
-// Define the shape of a navigation link so every entry is predictable.
-interface FooterLink {
-  href: string;
-  label: string;
-  external?: boolean;
-}
-
-// ─── Pillar 3: Single Source of Truth for all footer navigation ───────────────
-// Edit links here — nothing else needs to change.
-const productLinks: FooterLink[] = [
-  { href: "/#pricing", label: "Pricing" },
-  { href: "/#features", label: "Features" },
-  { href: "/#faq", label: "FAQ" },
-];
-
-const legalLinks: FooterLink[] = [
-  { href: "/tos", label: "Terms of Service" },
-  { href: "/privacy-policy", label: "Privacy Policy" },
-];
+import config, { NavigationLink } from "@/config";
 
 // ─── Pillar 2: Sub-component — one job: render a titled column of links ───────
 const LinkColumn = ({
@@ -79,7 +58,7 @@ export default function Footer() {
         <div className="flex lg:items-start md:flex-row md:flex-nowrap flex-wrap flex-col">
 
           {/* ── Brand column ─────────────────────────────────────────────── */}
-          <div className="w-64 flex-shrink-0 md:mx-0 mx-auto text-center md:text-left">
+          <div className="w-64 shrink-0 md:mx-0 mx-auto text-center md:text-left">
             {/* Logo / App name — links back to the top of the page */}
             <Link
               href="/"
@@ -98,15 +77,16 @@ export default function Footer() {
             </p>
 
             <p className="mt-3 text-sm text-base-content/60">
-              Copyright © {new Date().getFullYear()} - All rights reserved
+              Copyright © 2024-Present - All rights reserved
             </p>
           </div>
 
           {/* ── Navigation columns ───────────────────────────────────────── */}
           <div className="flex-grow flex flex-wrap justify-center -mb-10 md:mt-0 mt-10 text-center">
             {/* ─── Pillar 3: Link data flows DOWN into LinkColumn ──────── */}
-            <LinkColumn title="PRODUCT" links={productLinks} />
-            <LinkColumn title="LEGAL" links={legalLinks} />
+            {config.footer.map((column) => (
+              <LinkColumn key={column.title} title={column.title} links={column.links} />
+            ))}
           </div>
 
         </div>

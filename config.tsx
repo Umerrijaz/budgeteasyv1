@@ -3,12 +3,25 @@ import { ProblemProps } from "@/components/Problem";
 import { FeaturesAccordionProps } from "@/components/FeaturesAccordion";
 import { FAQProps } from "@/components/FAQ";
 
+export interface NavigationLink {
+  href: string;
+  label: string;
+  external?: boolean;
+}
+
+export interface FooterColumn {
+  title: string;
+  links: NavigationLink[];
+}
+
 interface ConfigProps {
   appName: string;
   problem: ProblemProps;
   features: FeaturesAccordionProps;
   pricing: PricingTier[];
   faqs: FAQProps;
+  footer: FooterColumn[];
+  headerLinks: NavigationLink[];
 }
 
 const config: ConfigProps = {
@@ -135,6 +148,28 @@ const config: ConfigProps = {
       },
     ],
   },
+  headerLinks: [
+    { href: "/#pricing", label: "Pricing" },
+    { href: "/#testimonials", label: "Reviews" },
+    { href: "/#faq", label: "FAQ" },
+  ],
+  footer: [
+    {
+      title: "PRODUCT",
+      links: [
+        { href: "/#pricing", label: "Pricing" },
+        { href: "/#features", label: "Features" },
+        { href: "/#faq", label: "FAQ" },
+      ],
+    },
+    {
+      title: "LEGAL",
+      links: [
+        { href: "/tos", label: "Terms of Service" },
+        { href: "/privacy-policy", label: "Privacy Policy" },
+      ],
+    },
+  ],
 };
 
 export default config;

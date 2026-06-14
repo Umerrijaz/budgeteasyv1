@@ -4,13 +4,6 @@ import ButtonSignin from "./ButtonSignin";
 import config from "@/config";
 import MobileMenu from "./MobileMenu";
 
-// Single Source of Truth: one master list for both desktop and mobile menus
-const links: { href: string; label: string }[] = [
-  { href: "/#pricing", label: "Pricing" },
-  { href: "/#testimonials", label: "Reviews" },
-  { href: "/#faq", label: "FAQ" },
-];
-
 // The CTA button — typed as ReactNode so it can be a component, text, or null
 const cta: ReactNode = <ButtonSignin extraStyle="px-8" />;
 
@@ -30,7 +23,7 @@ export default function Header() {
       <div className="navbar-center hidden lg:flex">
         {/* DaisyUI: "menu menu-horizontal" renders links side-by-side */}
         <ul className="menu menu-horizontal px-1 gap-2">
-          {links.map((link) => (
+          {config.headerLinks.map((link) => (
             <li key={link.href}>
               <Link href={link.href} title={link.label} className="font-medium">
                 {link.label}
@@ -46,7 +39,7 @@ export default function Header() {
         <div className="hidden lg:flex">{cta}</div>
 
         {/* Mobile menu (Client Component) — only visible on small screens */}
-        <MobileMenu links={links} cta={cta} />
+        <MobileMenu links={config.headerLinks} cta={cta} />
       </div>
 
     </div>
