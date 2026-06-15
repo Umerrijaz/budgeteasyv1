@@ -21,6 +21,7 @@
 11. [The AI Context Wall — How to Survive Week 3](#11-the-ai-context-wall)
 12. [Next.js Best Practices Checklist](#12-nextjs-best-practices-checklist)
 13. [Convex Best Practices Checklist](#13-convex-best-practices-checklist)
+14. [The Capstone — Reverse-Engineering a Real Feature](#14-the-capstone)
 
 ---
 
@@ -1841,6 +1842,532 @@ Use this alongside the Next.js checklist when building database-powered features
 - [ ] Convex functions are organized by table (one file per table)
 - [ ] `_generated/` folder is never manually edited
 - [ ] `.env.local` contains `NEXT_PUBLIC_CONVEX_URL` (never committed to git)
+
+---
+
+## 14. The Capstone — Reverse-Engineering a Real Feature
+
+> Every section above taught you a concept. This section shows you ALL of them executing together inside ONE real feature of BudgetEasy.
+
+The feature we'll reverse-engineer: **Category Allocation** — the core interaction of any zero-based budgeting app.
+
+### What the User Sees
+
+The user opens their June 2026 budget. At the top, a banner reads: **"$1,200 left to allocate"**. Below it, a list of categories (Groceries, Rent, Entertainment, etc.) each with an input field. The user types `400` into Groceries. Instantly, the banner updates to **"$800 left to allocate"** and the Groceries row shows `$400 / $400` (spent / allocated). Another user on a different device sees the exact same update in real time.
+
+That one interaction exercises every single concept in this roadmap. Let's trace it.
+
+---
+
+### Step 1: The Contract (Law 5 — Contracts Before Code)
+
+Before writing ANY component or backend code, define the shapes. This is what the senior architect does first.
+
+**Database contract — `convex/schema.ts`:**
+```tsx
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  budgets: defineTable({
+    name: v.string(),              // "June 2026"
+    totalIncome: v.number(),       // 5000
+    userId: v.string(),            // who owns this budget
+    createdAt: v.number(),         // timestamp
+  }).index("by_user", ["userId"]),  // ← fast lookup by user
+
+  categories: defineTable({
+    budgetId: v.id("budgets"),     // ← links to a specific budget
+    name: v.string(),              // "Groceries"
+    allocated: v.number(),         // 400 (how much the user budgeted)
+    spent: v.number(),             // 237.50 (how much actually spent)
+    color: v.optional(v.string()), // "#4CAF50" for UI display
+  }).index("by_budget", ["budgetId"]),  // ← fast lookup by budget
+});
+```
+
+**Frontend contracts — component props:**
+```tsx
+// What the banner at the top needs
+export interface BudgetHeaderProps {
+  budgetName: string;          // "June 2026"
+  totalIncome: number;         // 5000
+  totalAllocated: number;      // 3800 (sum of all category allocations)
+}
+
+// What each category row needs
+export interface CategoryRowProps {
+  _id: Id<"categories">;       // Convex document ID
+  name: string;                // "Groceries"
+  allocated: number;           // 400
+  spent: number;               // 237.50
+  color?: string;              // "#4CAF50"
+  onAllocate: (id: Id<"categories">, amount: number) => void;  // ← EVENT flows UP
+}
+
+// What the full page needs
+export interface BudgetPageProps {
+  budget: Budget;              // the budget document
+  categories: Category[];      // all categories for this budget
+}
+```
+
+**Why this matters:** These contracts are written BEFORE a single pixel exists. The AI can now generate perfect components because it knows the exact shape of every piece of data. This is Law 5 in action.
+
+---
+
+### Step 2: The Backend (Law 1 — Separation of Concerns)
+
+Each Convex function has ONE job. The backend doesn't know or care about UI.
+
+**`convex/budgets.ts` — Budget queries:**
+```tsx
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+// ONE JOB: Get a single budget by ID
+export const getById = query({
+  args: { budgetId: v.id("budgets") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.budgetId);
+  },
+});
+```
+
+**`convex/categories.ts` — Category queries AND mutations:**
+```tsx
+import { query, mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+// ONE JOB: Get all categories for a specific budget
+export const listByBudget = query({
+  args: { budgetId: v.id("budgets") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("categories")
+      .withIndex("by_budget", (q) => q.eq("budgetId", args.budgetId))
+      //         ↑ uses the index from schema.ts — fast lookup
+      .collect();
+  },
+});
+
+// ONE JOB: Update the allocated amount for a single category
+export const updateAllocation = mutation({
+  args: {
+    categoryId: v.id("categories"),
+    newAmount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Validate: amount cannot be negative
+    if (args.newAmount < 0) {
+      throw new Error("Allocation cannot be negative");
+    }
+    await ctx.db.patch(args.categoryId, {
+      allocated: args.newAmount,
+    });
+    // That's it. Convex handles:
+    // 1. Persisting to the database
+    // 2. Notifying ALL connected clients via WebSocket
+    // 3. Re-running every useQuery() that reads from "categories"
+  },
+});
+```
+
+**Law 1 in action:** `schema.ts` defines the shape. `budgets.ts` reads budgets. `categories.ts` reads and writes categories. Three files, three concerns. No file does more than one thing.
+
+---
+
+### Step 3: The Component Tree (Law 6 — Composition Over Complexity)
+
+Don't build one `BudgetPage` monster. Build small components and snap them together.
+
+```
+BudgetPageWrapper ("use client" — fetches data from Convex)
+│
+├── Loading state: <BudgetSkeleton />
+│
+└── Data loaded:
+    ├── <BudgetHeader />          ← Server-compatible, displays totals
+    │     └── Shows: "June 2026 — $1,200 left to allocate"
+    │
+    └── <CategoryList />          ← Server-compatible, maps over array
+          ├── <CategoryRow />     ← "use client", has the allocation input
+          ├── <CategoryRow />     ← each row manages its own input state
+          ├── <CategoryRow />
+          └── <CategoryRow />
+```
+
+**4 components. Each under 60 lines. Each with ONE job.** That's Law 6.
+
+---
+
+### Step 4: The Display Components (Law 4 — Static by Default)
+
+**`BudgetHeader.tsx` — Server Component (NO `"use client"`)**
+```tsx
+// This component has ZERO interactivity.
+// It receives numbers → it renders text. That's it.
+// No useState, no useEffect, no event handlers.
+// Ships ZERO JavaScript to the browser.
+
+export interface BudgetHeaderProps {
+  budgetName: string;
+  totalIncome: number;
+  totalAllocated: number;
+}
+
+export default function BudgetHeader({
+  budgetName,
+  totalIncome,
+  totalAllocated,
+}: BudgetHeaderProps) {
+  const remaining = totalIncome - totalAllocated;  // ← derived value, NOT state
+  //                                                   (Law: never store derived data in state)
+
+  return (
+    <div className="bg-base-200 rounded-box p-6">
+      {/* ↑ DaisyUI semantic tokens, not hardcoded colors */}
+      <h2 className="text-2xl font-bold text-base-content">{budgetName}</h2>
+      <p className="text-4xl font-extrabold mt-2">
+        <span className={remaining >= 0 ? "text-success" : "text-error"}>
+          {/* ↑ Conditional styling — same pattern as Pricing.tsx isPopular */}
+          ${remaining.toLocaleString()}
+        </span>
+        <span className="text-base-content/60 text-lg ml-2">left to allocate</span>
+      </p>
+    </div>
+  );
+}
+```
+
+**What to notice:**
+- `remaining` is COMPUTED inline, not stored in `useState`. It's derived from `totalIncome` and `totalAllocated`. (CONTEXT.md rule: "Never store derived data in state.")
+- The component uses `text-success` and `text-error` — DaisyUI semantic tokens that automatically change with the theme. (CONTEXT.md rule: "Never use hardcoded hex colors.")
+- This component has no idea whether its data came from `config.tsx` or Convex. It just receives props and renders. **That's the power of separation of concerns.**
+
+---
+
+### Step 5: The Interactive Component (Law 2 — Data Down, Events Up)
+
+**`CategoryRow.tsx` — Client Component (`"use client"`)**
+```tsx
+"use client";
+import { useState } from "react";
+import { Id } from "../convex/_generated/dataModel";
+
+export interface CategoryRowProps {
+  _id: Id<"categories">;
+  name: string;
+  allocated: number;
+  spent: number;
+  color?: string;
+  onAllocate: (id: Id<"categories">, amount: number) => void;
+  //           ↑ EVENT flows UP — the row doesn't write to the database itself.
+  //             It tells the PARENT what happened. The parent decides what to do.
+}
+
+export default function CategoryRow({
+  _id,
+  name,
+  allocated,
+  spent,
+  color,
+  onAllocate,
+}: CategoryRowProps) {
+  // Local UI state — only tracks what the user is CURRENTLY typing
+  const [inputValue, setInputValue] = useState(allocated.toString());
+  //                                           ↑ initialized from the prop
+
+  const handleBlur = () => {
+    const parsed = parseFloat(inputValue);
+    if (!isNaN(parsed) && parsed !== allocated) {
+      onAllocate(_id, parsed);  // ← EVENT FLOWS UP to the parent
+      //                           The CategoryRow does NOT call useMutation directly.
+      //                           It fires an event. The parent handles the mutation.
+    }
+  };
+
+  const percentUsed = allocated > 0 ? (spent / allocated) * 100 : 0;
+  //                                   ↑ derived value — NOT stored in state
+
+  return (
+    <div className="flex items-center gap-4 p-4 bg-base-100 rounded-box">
+      {/* Color indicator */}
+      <div
+        className="w-3 h-3 rounded-full"
+        style={{ backgroundColor: color ?? "oklch(var(--p))" }}
+        {/* ↑ The ONLY place inline style is allowed: dynamic runtime values */}
+      />
+
+      {/* Category name */}
+      <span className="font-medium text-base-content flex-1">{name}</span>
+
+      {/* Allocation input — THIS is why we need "use client" */}
+      <input
+        type="number"
+        className="input input-bordered w-28 text-right"
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onBlur={handleBlur}           {/* ← fires event UP when user finishes typing */}
+        onKeyDown={(e) => e.key === "Enter" && handleBlur()}
+      />
+
+      {/* Spent indicator */}
+      <span className="text-base-content/60 w-24 text-right">
+        ${spent.toLocaleString()} spent
+      </span>
+
+      {/* Progress bar */}
+      <progress
+        className={`progress w-32 ${
+          percentUsed > 100 ? "progress-error" : "progress-primary"
+          // ↑ Same conditional styling pattern as Pricing.tsx isPopular
+        }`}
+        value={percentUsed}
+        max="100"
+      />
+    </div>
+  );
+}
+```
+
+**Law 2 dissected in this component:**
+```
+DATA FLOWS DOWN (props):                    EVENTS FLOW UP (callbacks):
+─────────────────────────                   ────────────────────────────
+Parent passes:                              Child fires:
+  name="Groceries"           ──→ display      onAllocate(id, 400)  ──→ parent handles
+  allocated={300}            ──→ display      (user typed 400 and hit Enter)
+  spent={237.50}             ──→ display
+  onAllocate={handler}       ──→ stored       Parent calls useMutation()
+                                              Database updates
+                                              useQuery() re-fires
+                                              New props flow DOWN again
+                                              ← THE FEEDBACK LOOP COMPLETES
+```
+
+**Why `CategoryRow` does NOT call `useMutation` directly:**
+- It keeps the component reusable. You could reuse `CategoryRow` in a "review mode" where clicking does nothing.
+- It follows Law 2 strictly. The child reports what happened. The parent decides the consequence.
+- It makes testing trivial. Pass a mock `onAllocate`, assert it was called with the right values.
+
+---
+
+### Step 6: The Wrapper — Wiring It All Together (The Feedback Loop)
+
+**`BudgetPageWrapper.tsx` — Client Component (THE ORCHESTRATOR)**
+```tsx
+"use client";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+import { Id } from "../convex/_generated/dataModel";
+import BudgetHeader from "./BudgetHeader";
+import CategoryRow from "./CategoryRow";
+
+interface BudgetPageWrapperProps {
+  budgetId: Id<"budgets">;
+}
+
+export default function BudgetPageWrapper({ budgetId }: BudgetPageWrapperProps) {
+  // ─── DATA SOURCE ───────────────────────────────────────────
+  // These replace "import config from '@/config'"
+  // They are SUBSCRIPTIONS, not one-time fetches.
+  // When ANY mutation changes budgets or categories,
+  // these automatically re-run and the component re-renders.
+  const budget = useQuery(api.budgets.getById, { budgetId });
+  const categories = useQuery(api.categories.listByBudget, { budgetId });
+
+  // ─── MUTATION (the write path) ─────────────────────────────
+  const updateAllocation = useMutation(api.categories.updateAllocation);
+
+  // ─── LOADING STATE ─────────────────────────────────────────
+  // useQuery returns undefined while data is loading.
+  // You MUST handle this. Never render with undefined data.
+  if (!budget || !categories) {
+    return (
+      <div className="flex justify-center items-center min-h-[400px]">
+        <span className="loading loading-spinner loading-lg text-primary" />
+      </div>
+    );
+  }
+
+  // ─── DERIVED VALUE ─────────────────────────────────────────
+  // The total allocated amount is COMPUTED from the categories.
+  // It is NOT stored in state. It is NOT stored in the database.
+  // It is derived fresh on every render.
+  const totalAllocated = categories.reduce(
+    (sum, cat) => sum + cat.allocated, 0
+  );
+
+  // ─── EVENT HANDLER ─────────────────────────────────────────
+  // This is the function that CategoryRow calls when the user
+  // types a new allocation. The event FLOWS UP from the child,
+  // and the parent HANDLES it by calling the mutation.
+  const handleAllocate = (categoryId: Id<"categories">, amount: number) => {
+    // Validation: don't allow over-allocation
+    const otherAllocations = categories
+      .filter((c) => c._id !== categoryId)
+      .reduce((sum, c) => sum + c.allocated, 0);
+
+    if (otherAllocations + amount > budget.totalIncome) {
+      alert("Cannot allocate more than your total income!");
+      return;
+    }
+
+    // Fire the mutation — Convex handles the rest:
+    // 1. Writes to database
+    // 2. Re-runs useQuery(api.categories.listByBudget)
+    // 3. categories variable updates
+    // 4. totalAllocated recomputes
+    // 5. BudgetHeader re-renders with new "remaining" value
+    // 6. CategoryRow re-renders with new allocated value
+    // ALL OF THIS HAPPENS AUTOMATICALLY. Zero manual refresh.
+    updateAllocation({ categoryId, newAmount: amount });
+  };
+
+  // ─── ASSEMBLY (same pattern as page.tsx) ───────────────────
+  // This wrapper does the same job as page.tsx in the static app:
+  // 1. Gets data (useQuery instead of config import)
+  // 2. Passes data DOWN as props
+  // 3. Passes event handlers DOWN as props
+  return (
+    <div className="max-w-3xl mx-auto p-6 space-y-4">
+      {/* DATA flows DOWN — BudgetHeader receives computed values */}
+      <BudgetHeader
+        budgetName={budget.name}
+        totalIncome={budget.totalIncome}
+        totalAllocated={totalAllocated}
+      />
+
+      {/* .map() — the #1 React pattern, same as Problem.tsx steps */}
+      {categories.map((category) => (
+        <CategoryRow
+          key={category._id}          {/* ← unique key, same as any .map() */}
+          _id={category._id}
+          name={category.name}
+          allocated={category.allocated}
+          spent={category.spent}
+          color={category.color}
+          onAllocate={handleAllocate}  {/* ← event handler passed DOWN */}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+### Step 7: The Page File (The Boss — Same Pattern as Always)
+
+**`app/budget/[id]/page.tsx` — the thinnest possible file:**
+```tsx
+import BudgetPageWrapper from "@/components/BudgetPageWrapper";
+import { Id } from "../../../convex/_generated/dataModel";
+
+// Next.js dynamic route: /budget/k17abc... → params.id = "k17abc..."
+export default function BudgetPage({ params }: { params: { id: string } }) {
+  return (
+    <main>
+      <BudgetPageWrapper budgetId={params.id as Id<"budgets">} />
+    </main>
+  );
+}
+```
+
+**3 lines of real logic.** The page does what it always does:
+1. Receives the route parameter
+2. Passes it to the component
+3. Stays out of the way
+
+Compare this to the static landing page's `page.tsx`:
+```tsx
+// STATIC:    <Hero {...config.hero} />
+// CONVEX:    <BudgetPageWrapper budgetId={params.id} />
+// Same pattern. Same thinness. Different data source.
+```
+
+---
+
+### The Complete Map: Every Concept → Where It Appears
+
+| Roadmap Concept | Where It Appears in This Feature |
+|---|---|
+| **Law 1: Separation of Concerns** | Schema defines shape. `categories.ts` handles data logic. `CategoryRow` handles display. `BudgetPageWrapper` handles orchestration. Four files, four concerns. |
+| **Law 2: Data Down, Events Up** | `BudgetPageWrapper` passes `allocated` DOWN to `CategoryRow`. `CategoryRow` fires `onAllocate` UP. The wrapper calls the mutation. |
+| **Law 3: Single Source of Truth** | The allocated amount lives in ONE place: the Convex `categories` table. Every component reads from the same source via `useQuery`. |
+| **Law 4: Static by Default** | `BudgetHeader` is a Server Component — pure display, zero JS. Only `CategoryRow` (which has the input) and the wrapper (which calls hooks) are `"use client"`. |
+| **Law 5: Contracts Before Code** | `BudgetHeaderProps`, `CategoryRowProps`, and the Convex schema were ALL defined before writing any rendering logic. |
+| **Law 6: Composition** | 4 small components assembled in a tree. No component exceeds 80 lines. Each is testable in isolation. |
+| **The Feedback Loop** | User types 400 → `onAllocate` fires → mutation writes to DB → `useQuery` re-runs → `totalAllocated` recomputes → `BudgetHeader` shows new remaining → the loop completes. |
+| **TypeScript Contracts** | `CategoryRowProps` defines the exact shape. The AI knows precisely what fields exist, their types, and which are optional. |
+| **Convex Schema** | `v.id("budgets")` links categories to budgets. `v.optional(v.string())` makes color optional. `.index("by_budget")` enables fast filtered queries. |
+| **Convex Queries** | `listByBudget` uses `.withIndex()` for performance. Returns an array that the wrapper maps over. |
+| **Convex Mutations** | `updateAllocation` validates input, patches one field, and Convex auto-syncs all clients. |
+| **Server vs Client** | `BudgetHeader` = Server (display). `CategoryRow` = Client (input). `BudgetPageWrapper` = Client (hooks). The page file itself has zero hooks. |
+| **Wrapper Pattern** | `BudgetPageWrapper` is `"use client"` and calls `useQuery`. It passes the data as plain props to `BudgetHeader`, which can remain a server-compatible component. |
+| **Derived Values** | `totalAllocated` and `percentUsed` are computed inline — never stored in state, never stored in the database. |
+| **Real-Time Reactivity** | If your partner allocates $200 to Rent on their phone, your screen updates instantly. No refresh. No polling. Convex pushes the change over WebSocket. |
+| **Conditional Styling** | `text-success` vs `text-error` on the remaining amount. `progress-error` vs `progress-primary` on the progress bar. Same pattern as `Pricing.tsx`'s `isPopular`. |
+| **The .map() Pattern** | `categories.map(cat => <CategoryRow ... />)` — the same pattern you learned in `Problem.tsx` with steps. |
+| **Loading State** | `if (!budget || !categories)` — always handle the moment before data arrives. |
+| **DaisyUI Tokens** | `bg-base-200`, `text-base-content`, `input-bordered`, `progress-primary`, `loading-spinner` — zero hardcoded colors anywhere. |
+
+---
+
+### How to Build Every Future Feature
+
+This Category Allocation walkthrough IS the template. Every feature you build follows the same steps:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 1: DEFINE CONTRACTS                                    │
+│   - What tables/fields does this feature need? (schema.ts)  │
+│   - What props does each component need? (interfaces)       │
+│   - What events flow from child → parent? (callback props)  │
+└─────────────────────────┬───────────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 2: BUILD THE BACKEND                                   │
+│   - Write queries (one per read operation)                  │
+│   - Write mutations (one per write operation)               │
+│   - Add indexes for filtered queries                        │
+└─────────────────────────┬───────────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 3: BUILD DISPLAY COMPONENTS (Server — no "use client") │
+│   - Pure props in → HTML out                                │
+│   - Conditional styling via DaisyUI tokens                  │
+│   - Derived values computed inline, not stored in state     │
+└─────────────────────────┬───────────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 4: BUILD INTERACTIVE COMPONENTS (Client)               │
+│   - useState for local UI state (input values, open/close)  │
+│   - Fire events UP via callback props                       │
+│   - Never call useMutation directly — let the parent decide │
+└─────────────────────────┬───────────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 5: BUILD THE WRAPPER (Client — the orchestrator)       │
+│   - useQuery() to subscribe to live data                    │
+│   - useMutation() to handle write events                    │
+│   - Handle loading states                                   │
+│   - Compute derived values                                  │
+│   - Pass everything DOWN as props                           │
+└─────────────────────────┬───────────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 6: WIRE IT UP IN THE PAGE FILE                         │
+│   - 3 lines. Import wrapper. Render it. Done.               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Budget overview page? Same 6 steps.
+Transaction history page? Same 6 steps.
+Settings page? Same 6 steps.
+
+**The pattern never changes. Only the contracts change.**
 
 ---
 
