@@ -1136,18 +1136,18 @@ import config from "@/config";
 // CONVEX (what you'll do with Convex)
 // ──────────────────────────────────────────────
 
-// STEP 1: Define the query (convex/budgets.ts)
+// STEP 1: Define the query (convex/transactions.ts)
 import { query } from "./_generated/server";
 
-export const list = query({
+export const listRecent = query({
   // No arguments needed — just "give me everything"
   args: {},
   // The handler runs on the Convex server, NOT in the browser
   handler: async (ctx) => {
-    return await ctx.db.query("budgets").collect();
+    return await ctx.db.query("transactions").order("desc").take(50);
     //          ↑ ctx.db is the database connection
-    //                    ↑ .query("budgets") = "look in the budgets table"
-    //                                         ↑ .collect() = "return all rows"
+    //                    ↑ .query("transactions") = "look in the table"
+    //                                              ↑ .order().take() = "get latest 50"
   },
 });
 
@@ -1156,15 +1156,15 @@ export const list = query({
 import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 
-function BudgetList() {
-  const budgets = useQuery(api.budgets.list);
+function TransactionList() {
+  const transactions = useQuery(api.transactions.listRecent);
   //                       ↑ type-safe reference to the query you defined
-  //    ↑ budgets is undefined while loading, then becomes Budget[]
+  //    ↑ transactions is undefined while loading, then becomes an array
 
-  if (!budgets) return <div>Loading...</div>;  // ← handle the loading state
+  if (!transactions) return <div>Loading...</div>;  // ← handle the loading state
 
-  return budgets.map(budget => (
-    <div key={budget._id}>{budget.name}</div>
+  return transactions.map(tx => (
+    <div key={tx._id}>{tx.description} - ${tx.amount}</div>
   ));
 }
 ```
@@ -1173,30 +1173,30 @@ function BudgetList() {
 
 ```tsx
 // Pattern 1: Get all items
-export const list = query({
+export const listAll = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("budgets").collect();
+    return await ctx.db.query("transactions").collect();
   },
 });
 
 // Pattern 2: Get one item by ID
 export const getById = query({
-  args: { budgetId: v.id("budgets") },
+  args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.budgetId);
+    return await ctx.db.get(args.transactionId);
     //                  ↑ .get() returns a single document by ID
   },
 });
 
 // Pattern 3: Filter items (like SQL WHERE)
-export const listByUser = query({
-  args: { userId: v.string() },
+export const listByBudget = query({
+  args: { budgetId: v.id("budgets") },
   handler: async (ctx, args) => {
     return await ctx.db
-      .query("budgets")
-      .filter((q) => q.eq(q.field("userId"), args.userId))
-      //              ↑ "where userId equals the argument"
+      .query("transactions")
+      .filter((q) => q.eq(q.field("budgetId"), args.budgetId))
+      //              ↑ "where budgetId equals the argument"
       .collect();
   },
 });
@@ -1206,23 +1206,21 @@ export const listRecent = query({
   args: {},
   handler: async (ctx) => {
     return await ctx.db
-      .query("budgets")
+      .query("transactions")
       .order("desc")           // ← newest first
       .take(10);               // ← only get 10
   },
 });
 
 // Pattern 5: Get related data (join-like)
-export const getWithCategories = query({
-  args: { budgetId: v.id("budgets") },
+export const getWithCategory = query({
+  args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    const budget = await ctx.db.get(args.budgetId);
-    const categories = await ctx.db
-      .query("categories")
-      .filter((q) => q.eq(q.field("budgetId"), args.budgetId))
-      .collect();
-    return { ...budget, categories };
-    //     ↑ combine budget + its categories into one object
+    const tx = await ctx.db.get(args.transactionId);
+    if (!tx) return null;
+    const category = await ctx.db.get(tx.categoryId);
+    return { ...tx, category };
+    //     ↑ combine transaction + its category into one object
   },
 });
 ```
@@ -1232,50 +1230,54 @@ export const getWithCategories = query({
 A mutation is a function that WRITES data to the database. This is where Convex goes beyond `config.tsx`. Config is read-only. Mutations let the UI change data.
 
 ```tsx
-// convex/budgets.ts
+// convex/transactions.ts
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 
-// CREATE a new budget
-export const create = mutation({
+// CREATE a new transaction
+export const add = mutation({
   // Define EXACTLY what arguments this mutation accepts (the contract!)
   args: {
-    name: v.string(),
-    totalIncome: v.number(),
-    userId: v.string(),
+    budgetId: v.id("budgets"),
+    categoryId: v.id("categories"),
+    amount: v.number(),
+    description: v.string(),
+    type: v.union(v.literal("income"), v.literal("expense")),
   },
   handler: async (ctx, args) => {
-    // Insert a new row into the budgets table
-    const budgetId = await ctx.db.insert("budgets", {
-      name: args.name,
-      totalIncome: args.totalIncome,
-      userId: args.userId,
-      createdAt: Date.now(),
+    // Insert a new row into the transactions table
+    const transactionId = await ctx.db.insert("transactions", {
+      budgetId: args.budgetId,
+      categoryId: args.categoryId,
+      amount: args.amount,
+      description: args.description,
+      type: args.type,
+      date: Date.now(),
     });
-    return budgetId;  // ← returns the new document's ID
+    return transactionId;  // ← returns the new document's ID
   },
 });
 
-// UPDATE an existing budget
-export const updateIncome = mutation({
+// UPDATE an existing transaction
+export const updateAmount = mutation({
   args: {
-    budgetId: v.id("budgets"),
-    newIncome: v.number(),
+    transactionId: v.id("transactions"),
+    newAmount: v.number(),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.budgetId, {
-      totalIncome: args.newIncome,
+    await ctx.db.patch(args.transactionId, {
+      amount: args.newAmount,
     });
     // .patch() updates ONLY the fields you specify
     // .replace() would overwrite the ENTIRE document
   },
 });
 
-// DELETE a budget
+// DELETE a transaction
 export const remove = mutation({
-  args: { budgetId: v.id("budgets") },
+  args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    await ctx.db.delete(args.budgetId);
+    await ctx.db.delete(args.transactionId);
   },
 });
 ```
@@ -1287,38 +1289,55 @@ export const remove = mutation({
 import { useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { useState } from "react";
+import { Id } from "../convex/_generated/dataModel";
 
-function CreateBudgetForm() {
-  const [name, setName] = useState("");
-  const [income, setIncome] = useState("");
+function AddTransactionForm({ 
+  budgetId, 
+  categoryId 
+}: { 
+  budgetId: Id<"budgets">; 
+  categoryId: Id<"categories">; 
+}) {
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
   
   // useMutation returns a function you can call
-  const createBudget = useMutation(api.budgets.create);
+  const addTransaction = useMutation(api.transactions.add);
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    await createBudget({
-      name: name,
-      totalIncome: parseFloat(income),
-      userId: "user123",  // will come from auth later
+    await addTransaction({
+      budgetId,
+      categoryId,
+      description,
+      amount: parseFloat(amount),
+      type: "expense",
     });
     
     // After the mutation succeeds:
     // 1. The database is updated
-    // 2. ALL useQuery() calls watching "budgets" auto-refresh
-    // 3. Every connected client sees the new budget instantly
+    // 2. ALL useQuery() calls watching "transactions" auto-refresh
+    // 3. Every connected client sees the new transaction instantly
     // 4. You don't need to manually refresh or invalidate anything
     
-    setName("");
-    setIncome("");
+    setDescription("");
+    setAmount("");
   };
   
   return (
     <form onSubmit={handleSubmit}>
-      <input value={name} onChange={(e) => setName(e.target.value)} />
-      <input value={income} onChange={(e) => setIncome(e.target.value)} />
-      <button type="submit" className="btn btn-primary">Create Budget</button>
+      <input 
+        placeholder="Description"
+        value={description} 
+        onChange={(e) => setDescription(e.target.value)} 
+      />
+      <input 
+        placeholder="Amount"
+        value={amount} 
+        onChange={(e) => setAmount(e.target.value)} 
+      />
+      <button type="submit" className="btn btn-primary">Add Transaction</button>
     </form>
   );
 }
@@ -1470,13 +1489,13 @@ This is what makes Convex fundamentally different from REST APIs. **You never ma
 ```
 REST API approach (without Convex):
   1. Component mounts → fetch data → display
-  2. Another user adds a budget
+  2. Another user adds a transaction
   3. Your screen is STALE — you're looking at old data
   4. You must manually poll or refresh to see updates
 
 Convex approach:
   1. Component mounts → useQuery() subscribes → display
-  2. Another user adds a budget
+  2. Another user adds a transaction
   3. Convex server pushes the update through WebSocket
   4. useQuery() automatically re-renders your component
   5. Your screen is ALWAYS up to date
@@ -1484,11 +1503,11 @@ Convex approach:
 
 ```tsx
 // This component will ALWAYS show the latest data
-// Even if another user (or another browser tab) adds a budget
-function BudgetList() {
-  const budgets = useQuery(api.budgets.list);
+// Even if another user (or another browser tab) adds a transaction
+function TransactionList() {
+  const transactions = useQuery(api.transactions.listRecent);
   // ^^ This is not a one-time fetch. It's a SUBSCRIPTION.
-  // It re-runs every time the "budgets" table changes.
+  // It re-runs every time the "transactions" table changes.
   
   // You don't need:
   // ❌ useEffect(() => { fetch(...) }, [])
@@ -1496,8 +1515,8 @@ function BudgetList() {
   // ❌ manual cache invalidation
   // ❌ WebSocket setup code
   
-  if (!budgets) return <Loading />;
-  return budgets.map(b => <BudgetCard key={b._id} budget={b} />);
+  if (!transactions) return <Loading />;
+  return transactions.map(tx => <TransactionRow key={tx._id} transaction={tx} />);
 }
 ```
 
