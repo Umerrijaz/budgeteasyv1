@@ -22,6 +22,7 @@
 12. [Next.js Best Practices Checklist](#12-nextjs-best-practices-checklist)
 13. [Convex Best Practices Checklist](#13-convex-best-practices-checklist)
 14. [The Capstone — Reverse-Engineering a Real Feature](#14-the-capstone)
+15. [The Routing System — Where Every Page Goes](#15-the-routing-system)
 
 ---
 
@@ -1184,19 +1185,22 @@ export const listAll = query({
 export const getById = query({
   args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.transactionId);
-    //                  ↑ .get() returns a single document by ID
+    return await ctx.db.get("transactions", args.transactionId);
+    //                  ↑ .get(tableName, id) returns a single document
+    //                    Always pass the table name first (current Convex API)
   },
 });
 
-// Pattern 3: Filter items (like SQL WHERE)
+// Pattern 3: Filter items
+// ⚠️ AVOID .filter() on the database — it scans every row.
+// Prefer .withIndex() (see Section 8.8). Shown here ONLY to contrast.
 export const listByBudget = query({
   args: { budgetId: v.id("budgets") },
   handler: async (ctx, args) => {
     return await ctx.db
       .query("transactions")
-      .filter((q) => q.eq(q.field("budgetId"), args.budgetId))
-      //              ↑ "where budgetId equals the argument"
+      .withIndex("by_budget", (q) => q.eq("budgetId", args.budgetId))
+      //         ↑ uses an index — fast lookup (define it in schema.ts)
       .collect();
   },
 });
@@ -1216,9 +1220,9 @@ export const listRecent = query({
 export const getWithCategory = query({
   args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    const tx = await ctx.db.get(args.transactionId);
+    const tx = await ctx.db.get("transactions", args.transactionId);
     if (!tx) return null;
-    const category = await ctx.db.get(tx.categoryId);
+    const category = await ctx.db.get("categories", tx.categoryId);
     return { ...tx, category };
     //     ↑ combine transaction + its category into one object
   },
@@ -1265,11 +1269,11 @@ export const updateAmount = mutation({
     newAmount: v.number(),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.transactionId, {
+    await ctx.db.patch("transactions", args.transactionId, {
       amount: args.newAmount,
     });
-    // .patch() updates ONLY the fields you specify
-    // .replace() would overwrite the ENTIRE document
+    // .patch(tableName, id, fields) updates ONLY the fields you specify
+    // .replace(tableName, id, doc) would overwrite the ENTIRE document
   },
 });
 
@@ -1277,7 +1281,7 @@ export const updateAmount = mutation({
 export const remove = mutation({
   args: { transactionId: v.id("transactions") },
   handler: async (ctx, args) => {
-    await ctx.db.delete(args.transactionId);
+    await ctx.db.delete("transactions", args.transactionId);
   },
 });
 ```
@@ -1355,7 +1359,9 @@ action    → TALK to outside world  (can call APIs, send emails, etc.)
 
 ```tsx
 // convex/notifications.ts
+"use node";  // ← required when the action uses Node APIs / SDKs
 import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 export const sendBudgetAlert = action({
@@ -1370,8 +1376,10 @@ export const sendBudgetAlert = action({
       }),
     });
     
-    // Actions can also call mutations internally
-    await ctx.runMutation(api.notifications.markSent, {
+    // Actions reach the database by calling a query/mutation — never ctx.db.
+    // ALWAYS call internal.* (never api.*) from server code: internal functions
+    // cannot be invoked by clients, so they skip the public auth/validation contract.
+    await ctx.runMutation(internal.notifications.markSent, {
       userId: args.userId,
     });
   },
@@ -1519,6 +1527,77 @@ function TransactionList() {
   return transactions.map(tx => <TransactionRow key={tx._id} transaction={tx} />);
 }
 ```
+
+### 8.10 The Two Non-Negotiables — Auth + Validators
+
+Every example above was simplified to teach ONE concept at a time. In a real multi-user app like BudgetEasy, **every public query and mutation needs two more things** before you ship. Convex's own best-practices docs list both as required.
+
+#### Non-Negotiable 1: Validate arguments AND the return value
+
+You already saw `args:` validators. The matching half is `returns:` — it locks down the shape your function hands back, so the database can never leak a field you didn't intend.
+
+```tsx
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const getBudget = query({
+  args: { budgetId: v.id("budgets") },
+  returns: v.union(                       // ← define the OUTPUT shape too
+    v.object({
+      _id: v.id("budgets"),
+      _creationTime: v.number(),
+      name: v.string(),
+      totalIncome: v.number(),
+      userId: v.string(),
+    }),
+    v.null(),                             // .get() can return null — say so
+  ),
+  handler: async (ctx, args) => {
+    return await ctx.db.get("budgets", args.budgetId);
+  },
+});
+```
+
+**Rule:** `args` protects the way IN, `returns` protects the way OUT. Public functions need both.
+
+#### Non-Negotiable 2: Check auth + ownership in EVERY public function
+
+A Convex function is a public API endpoint. Anyone who knows the function name can call it with any ID. So you must verify (a) the user is signed in, and (b) the data they're touching actually belongs to them. Never trust an ID coming from the client.
+
+```tsx
+// convex/budgets.ts
+export const getById = query({
+  args: { budgetId: v.id("budgets") },
+  handler: async (ctx, args) => {
+    // (a) Is the user signed in? ctx.auth cannot be spoofed by the client.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const budget = await ctx.db.get("budgets", args.budgetId);
+
+    // (b) Does this budget belong to THIS user? Never use a spoofable
+    //     field (like email) for this check — use identity.subject.
+    if (!budget || budget.userId !== identity.subject) {
+      throw new Error("Not found"); // don't leak whether the ID exists
+    }
+
+    return budget;
+  },
+});
+```
+
+**Senior pattern — write the check once.** Repeating these eight lines in 30 functions is a recipe for forgetting one. Wrap `query`/`mutation` with a custom function (via `convex-helpers`) so `ctx.user` is always present, or extract a `getCurrentUser(ctx)` / `loadOwnedBudget(ctx, id)` helper and call it at the top of every function. (See the Convex rules in this repo for the full custom-function pattern.)
+
+```tsx
+// convex/lib/auth.ts — the helper every function reuses
+export async function getCurrentUser(ctx: QueryCtx | MutationCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Not authenticated");
+  return identity; // identity.subject is the unguessable user id
+}
+```
+
+> **Add this to your `CONTEXT.md`:** "Every public Convex function must (1) validate `args` and `returns`, and (2) call `getCurrentUser(ctx)` and verify ownership before reading or writing."
 
 ---
 
@@ -1830,23 +1909,31 @@ Use this alongside the Next.js checklist when building database-powered features
 - [ ] Field types use `v.` validators (never raw TypeScript types in schema)
 - [ ] Optional fields use `v.optional()` (not `?`)
 - [ ] References between tables use `v.id("tableName")` (not plain strings)
-- [ ] Indexes are defined for every field used in `.filter()` queries
+- [ ] Indexes are defined for every field you filter on — prefer `.withIndex()` over `.filter()`
+- [ ] No redundant indexes (`by_a` is unnecessary if you have `by_a_and_b`)
 
 ### Queries
 - [ ] Queries are defined with `query()` from `"./_generated/server"`
 - [ ] Arguments are validated with `args: { fieldName: v.type() }`
+- [ ] **Return values are validated with `returns:`** (locks the output shape)
+- [ ] **Every public function checks `ctx.auth.getUserIdentity()` and verifies ownership** (use `identity.subject`, never a spoofable field like email)
 - [ ] Filtered queries use `.withIndex()` instead of `.filter()` when an index exists
-- [ ] Queries return the minimal data needed (don't return entire tables if you only need a few fields)
+- [ ] `.collect()` is only used for small/bounded result sets — use `.paginate()` or `.take()` for unbounded lists (e.g., transactions)
+- [ ] Never call `Date.now()` inside a query (breaks caching/reactivity) — pass time as an arg or store a status field
+- [ ] `ctx.db.get/patch/replace/delete` always pass the table name first (`ctx.db.get("budgets", id)`)
 
 ### Mutations
 - [ ] Mutations are defined with `mutation()` from `"./_generated/server"`
-- [ ] All arguments are validated — never trust client input
+- [ ] All arguments AND return values are validated — never trust client input
+- [ ] Auth + ownership are checked before any write
 - [ ] Use `.patch()` for partial updates, `.replace()` for full replacements
+- [ ] All promises are awaited (`await ctx.db.patch(...)`)
 - [ ] Mutations return useful values (e.g., the new document's ID)
 
 ### Actions
-- [ ] Actions are used ONLY for external API calls (email, payment, etc.)
+- [ ] Actions are used ONLY for external API calls (email, payment, etc.) and use `"use node"` when they need Node APIs/SDKs
 - [ ] Actions call `ctx.runMutation()` or `ctx.runQuery()` to interact with the database (never `ctx.db` directly)
+- [ ] Actions schedule/call **`internal.*`** functions, never `api.*`
 - [ ] Actions are NOT used for simple database operations (use mutations instead)
 
 ### Client-Side
@@ -1859,8 +1946,11 @@ Use this alongside the Next.js checklist when building database-powered features
 ### Architecture
 - [ ] Display components are separated from data-fetching components (wrapper pattern)
 - [ ] Convex functions are organized by table (one file per table)
+- [ ] Wrappers are thin — business logic lives in plain TS helpers (e.g. `convex/lib/auth.ts`), not inside the `query`/`mutation` body
+- [ ] Repeated auth/ownership checks are extracted into a helper or custom function (`authedQuery`/`authedMutation`)
 - [ ] `_generated/` folder is never manually edited
 - [ ] `.env.local` contains `NEXT_PUBLIC_CONVEX_URL` (never committed to git)
+- [ ] Use `npx convex dev` while developing — never `npx convex deploy` (that's production only)
 
 ---
 
@@ -1944,11 +2034,18 @@ Each Convex function has ONE job. The backend doesn't know or care about UI.
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 
-// ONE JOB: Get a single budget by ID
+// ONE JOB: Get a single budget by ID (auth + ownership enforced)
 export const getById = query({
   args: { budgetId: v.id("budgets") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.budgetId);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const budget = await ctx.db.get("budgets", args.budgetId);
+    if (!budget || budget.userId !== identity.subject) {
+      throw new Error("Not found"); // never leak another user's data
+    }
+    return budget;
   },
 });
 ```
@@ -1962,6 +2059,14 @@ import { v } from "convex/values";
 export const listByBudget = query({
   args: { budgetId: v.id("budgets") },
   handler: async (ctx, args) => {
+    // Auth + ownership: confirm the caller owns the parent budget first
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const budget = await ctx.db.get("budgets", args.budgetId);
+    if (!budget || budget.userId !== identity.subject) {
+      throw new Error("Not found");
+    }
+
     return await ctx.db
       .query("categories")
       .withIndex("by_budget", (q) => q.eq("budgetId", args.budgetId))
@@ -1981,7 +2086,19 @@ export const updateAllocation = mutation({
     if (args.newAmount < 0) {
       throw new Error("Allocation cannot be negative");
     }
-    await ctx.db.patch(args.categoryId, {
+
+    // Auth + ownership: load the category, then its budget, and confirm
+    // the signed-in user owns it. Never trust the categoryId alone.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const category = await ctx.db.get("categories", args.categoryId);
+    if (!category) throw new Error("Not found");
+    const budget = await ctx.db.get("budgets", category.budgetId);
+    if (!budget || budget.userId !== identity.subject) {
+      throw new Error("Not found");
+    }
+
+    await ctx.db.patch("categories", args.categoryId, {
       allocated: args.newAmount,
     });
     // That's it. Convex handles:
@@ -1993,6 +2110,8 @@ export const updateAllocation = mutation({
 ```
 
 **Law 1 in action:** `schema.ts` defines the shape. `budgets.ts` reads budgets. `categories.ts` reads and writes categories. Three files, three concerns. No file does more than one thing.
+
+> **Production note:** These handlers are shown with auth + ownership checks (Non-Negotiable 2 from Section 8.10). For brevity the `returns:` validators are omitted here — but in real code add them to every function, and extract the repeated auth check into a `getCurrentUser(ctx)` / `loadOwnedBudget(ctx, id)` helper so you write it once, not in all three functions.
 
 ---
 
@@ -2222,7 +2341,7 @@ export default function BudgetPageWrapper({ budgetId }: BudgetPageWrapperProps) 
   // This is the function that CategoryRow calls when the user
   // types a new allocation. The event FLOWS UP from the child,
   // and the parent HANDLES it by calling the mutation.
-  const handleAllocate = (categoryId: Id<"categories">, amount: number) => {
+  const handleAllocate = async (categoryId: Id<"categories">, amount: number) => {
     // Validation: don't allow over-allocation
     const otherAllocations = categories
       .filter((c) => c._id !== categoryId)
@@ -2241,7 +2360,8 @@ export default function BudgetPageWrapper({ budgetId }: BudgetPageWrapperProps) 
     // 5. BudgetHeader re-renders with new "remaining" value
     // 6. CategoryRow re-renders with new allocated value
     // ALL OF THIS HAPPENS AUTOMATICALLY. Zero manual refresh.
-    updateAllocation({ categoryId, newAmount: amount });
+    await updateAllocation({ categoryId, newAmount: amount });
+    //  ↑ always await your mutations so errors surface instead of vanishing
   };
 
   // ─── ASSEMBLY (same pattern as page.tsx) ───────────────────
@@ -2284,25 +2404,32 @@ export default function BudgetPageWrapper({ budgetId }: BudgetPageWrapperProps) 
 import BudgetPageWrapper from "@/components/BudgetPageWrapper";
 import { Id } from "../../../convex/_generated/dataModel";
 
-// Next.js dynamic route: /budget/k17abc... → params.id = "k17abc..."
-export default function BudgetPage({ params }: { params: { id: string } }) {
+// Next.js dynamic route: /budget/k17abc... → params resolves to { id: "k17abc..." }
+// IMPORTANT (Next.js 15+/16): `params` is a Promise. The page must be `async`
+// and `await` it. Synchronous `params.id` access throws in Next.js 16.
+export default async function BudgetPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
   return (
     <main>
-      <BudgetPageWrapper budgetId={params.id as Id<"budgets">} />
+      <BudgetPageWrapper budgetId={id as Id<"budgets">} />
     </main>
   );
 }
 ```
 
-**3 lines of real logic.** The page does what it always does:
-1. Receives the route parameter
+**A handful of lines of real logic.** The page does what it always does:
+1. Receives (and awaits) the route parameter
 2. Passes it to the component
 3. Stays out of the way
 
 Compare this to the static landing page's `page.tsx`:
 ```tsx
 // STATIC:    <Hero {...config.hero} />
-// CONVEX:    <BudgetPageWrapper budgetId={params.id} />
+// CONVEX:    <BudgetPageWrapper budgetId={id} />   // id = await params
 // Same pattern. Same thinness. Different data source.
 ```
 
@@ -2321,8 +2448,9 @@ Compare this to the static landing page's `page.tsx`:
 | **The Feedback Loop** | User types 400 → `onAllocate` fires → mutation writes to DB → `useQuery` re-runs → `totalAllocated` recomputes → `BudgetHeader` shows new remaining → the loop completes. |
 | **TypeScript Contracts** | `CategoryRowProps` defines the exact shape. The AI knows precisely what fields exist, their types, and which are optional. |
 | **Convex Schema** | `v.id("budgets")` links categories to budgets. `v.optional(v.string())` makes color optional. `.index("by_budget")` enables fast filtered queries. |
-| **Convex Queries** | `listByBudget` uses `.withIndex()` for performance. Returns an array that the wrapper maps over. |
-| **Convex Mutations** | `updateAllocation` validates input, patches one field, and Convex auto-syncs all clients. |
+| **Convex Queries** | `listByBudget` checks auth + ownership, then uses `.withIndex()` for performance. Returns an array that the wrapper maps over. |
+| **Convex Mutations** | `updateAllocation` validates input, checks auth + ownership, patches one field, and Convex auto-syncs all clients. |
+| **Auth + Access Control** | Every public function calls `ctx.auth.getUserIdentity()` and verifies the budget belongs to `identity.subject` before reading or writing. |
 | **Server vs Client** | `BudgetHeader` = Server (display). `CategoryRow` = Client (input). `BudgetPageWrapper` = Client (hooks). The page file itself has zero hooks. |
 | **Wrapper Pattern** | `BudgetPageWrapper` is `"use client"` and calls `useQuery`. It passes the data as plain props to `BudgetHeader`, which can remain a server-compatible component. |
 | **Derived Values** | `totalAllocated` and `percentUsed` are computed inline — never stored in state, never stored in the database. |
@@ -2387,6 +2515,338 @@ Transaction history page? Same 6 steps.
 Settings page? Same 6 steps.
 
 **The pattern never changes. Only the contracts change.**
+
+---
+
+## 15. The Routing System
+
+> Section 3 showed you *what files exist*. This section shows you *where new screens go* — the exact folder you create when you need a new page, and why. It's written as a reusable **template**: the rules are universal to any Next.js App Router project, and the examples are BudgetEasy so you can see them concretely. Copy this mental model into every project you ever build.
+
+### 15.1 The One Rule That Explains Everything
+
+In the Next.js App Router, **there is no routing config file.** You never register routes. Instead:
+
+```
+YOUR FOLDER STRUCTURE  ===  YOUR URL STRUCTURE
+```
+
+- A **folder** inside `app/` = a segment of the URL.
+- A **`page.tsx`** inside that folder = "this URL is visitable; render this."
+- Everything else (`layout.tsx`, `loading.tsx`, etc.) = special behavior for that segment.
+
+```
+app/                        →  (the root)
+├── page.tsx                →  /                    (the landing page)
+├── dashboard/
+│   └── page.tsx            →  /dashboard
+└── budget/
+    └── [id]/
+        └── page.tsx        →  /budget/k17abc...    (dynamic — any id)
+```
+
+> **Mental model:** The URL bar is just a path through your `app/` folders. If you can draw the folder tree, you already know every URL in your app. A folder with **no `page.tsx`** is NOT a route — it's just organization (you'll use this on purpose in 15.4).
+
+### 15.2 The 7 Special Files (the entire App Router vocabulary)
+
+These are the ONLY special filenames. Memorize what each does and you've memorized routing.
+
+| File | What it does | Creates a URL? | Server/Client |
+|---|---|---|---|
+| `page.tsx` | The actual page content for this URL | ✅ Yes | Either |
+| `layout.tsx` | Shared shell that **wraps** this segment + everything nested below it. Persists across navigation (doesn't re-render) | ❌ No | Either |
+| `loading.tsx` | Instant fallback UI shown while the segment streams in (auto-wraps the page in `<Suspense>`) | ❌ No | Either |
+| `error.tsx` | Error boundary for this segment — catches crashes and shows a recovery UI | ❌ No | **Client** (required) |
+| `not-found.tsx` | UI shown when `notFound()` is called or a route doesn't match | ❌ No | Either |
+| `route.ts` | An API endpoint (GET/POST/...) instead of a page. **Never** put `page.tsx` and `route.ts` in the same folder | ✅ Yes (API) | Server |
+| `template.tsx` | Like `layout.tsx` but re-mounts on every navigation (rare — use for re-trigger animations) | ❌ No | Either |
+
+> **The 6 you'll use daily:** `page`, `layout`, `loading`, `error`, `not-found`, and occasionally `route`. That's it.
+
+### 15.3 The BudgetEasy Route Map (your concrete reference)
+
+Here is the full target structure for BudgetEasy. This is the "answer key" — when you wonder "where does X go?", find the closest analog here.
+
+```
+app/
+│
+├── layout.tsx                 ← ROOT layout. Wraps EVERY page.
+│                                 Lives here: <html>, <body>, fonts, theme,
+│                                 and the <ConvexClientProvider> (see 15.6).
+├── globals.css                ← design system entry (not a route)
+├── page.tsx                   →  /                    Marketing landing page
+├── loading.tsx                ← fallback for the whole app (optional)
+├── not-found.tsx              →  shown for any unmatched URL
+│
+├── (marketing)/               ← ROUTE GROUP: organizes public pages.
+│   │                            Parens = folder name does NOT appear in URL.
+│   ├── pricing/
+│   │   └── page.tsx           →  /pricing
+│   └── faq/
+│       └── page.tsx           →  /faq
+│
+├── (app)/                     ← ROUTE GROUP: the signed-in product.
+│   ├── layout.tsx             ← Shared app shell (sidebar, top bar, auth gate).
+│   │                            Wraps everything below — but NOT marketing.
+│   │
+│   ├── dashboard/
+│   │   ├── page.tsx           →  /dashboard          List of all budgets
+│   │   └── loading.tsx        ← skeleton while dashboard loads
+│   │
+│   ├── budget/
+│   │   └── [id]/              ← DYNAMIC segment (one budget per id)
+│   │       ├── page.tsx       →  /budget/k17abc...    The capstone feature
+│   │       ├── loading.tsx    ← spinner while the budget streams
+│   │       └── error.tsx      ← "Couldn't load this budget" recovery UI
+│   │
+│   ├── transactions/
+│   │   └── page.tsx           →  /transactions       Paginated history
+│   │
+│   └── settings/
+│       └── page.tsx           →  /settings           Theme, currency, profile
+│
+├── (auth)/                    ← ROUTE GROUP: sign-in flows
+│   ├── login/
+│   │   └── page.tsx           →  /login
+│   └── signup/
+│       └── page.tsx           →  /signup
+│
+└── api/
+    └── webhooks/
+        └── route.ts           →  /api/webhooks       (e.g. Stripe → action)
+```
+
+> **Why route groups?** `(marketing)`, `(app)`, and `(auth)` let you give each *area* its own `layout.tsx` (different shells) WITHOUT adding `/marketing` or `/app` to the URL. The signed-in pages share a sidebar; the marketing pages don't. That's the whole reason they exist.
+
+### 15.4 The 5 Segment Types (everything you can name a folder)
+
+| Folder name | Type | URL result | When to use |
+|---|---|---|---|
+| `dashboard/` | Static | `/dashboard` | A fixed, known page |
+| `[id]/` | Dynamic | `/budget/123` (`id`=`123`) | One page template, many records (a budget, a user, a post) |
+| `[...slug]/` | Catch-all | `/docs/a/b/c` (`slug`=`["a","b","c"]`) | Nested, unknown-depth paths (docs, file trees) |
+| `[[...slug]]/` | Optional catch-all | matches `/shop` AND `/shop/a/b` | Same as above, but the base path also matches |
+| `(group)/` | Route group | *(no URL change)* | Organize files / give an area its own layout |
+| `_lib/` | Private folder | *(not routable at all)* | Co-locate helpers/components that should never be a route |
+
+**Concrete BudgetEasy mapping:**
+- `budget/[id]` → each budget is the same UI, different data. **Dynamic.**
+- `(app)` → wraps every signed-in screen in one shell. **Route group.**
+- `_components` inside `(app)` → screen-specific components that aren't shared globally. **Private folder.**
+
+### 15.5 Dynamic Routes + Convex (the async params pattern)
+
+This is the exact wiring for `app/(app)/budget/[id]/page.tsx`. It ties the URL to a Convex record. **In Next.js 15+/16, `params` is a `Promise` — the page must be `async` and `await` it** (accessing `params.id` synchronously throws):
+
+```tsx
+// app/(app)/budget/[id]/page.tsx  — a thin Server Component
+import BudgetPageWrapper from "@/components/BudgetPageWrapper";
+import { Id } from "@/convex/_generated/dataModel";
+
+export default async function BudgetPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;   // ← Promise, not a plain object
+}) {
+  const { id } = await params;        // ← unwrap before use
+  return <BudgetPageWrapper budgetId={id as Id<"budgets">} />;
+}
+```
+
+The page stays thin (Server Component). The `"use client"` wrapper does the `useQuery`/`useMutation` work — exactly the pattern from Section 14.
+
+> **searchParams too:** `/transactions?month=06` is read the same way — `searchParams` is also a `Promise<{ month?: string }>` you `await`. Use **dynamic segments** (`[id]`) for *which record*, and **search params** (`?month=06`) for *filters/sorting* on a list.
+
+### 15.6 Layouts — The Nesting System (and where Convex plugs in)
+
+Layouts wrap pages and **nest**. The root layout wraps a section layout, which wraps the page. They persist across navigation (a sidebar doesn't flicker when you click between budgets).
+
+```
+<RootLayout>              app/layout.tsx        ← html, body, theme, fonts, Convex provider
+  <AppLayout>            app/(app)/layout.tsx   ← sidebar + auth gate
+    <BudgetPage />       app/(app)/budget/[id]/page.tsx
+  </AppLayout>
+</RootLayout>
+```
+
+The **root layout is where `ConvexClientProvider` lives** — once, at the top, so every page below can call `useQuery`/`useMutation` (Section 8.7):
+
+```tsx
+// app/layout.tsx
+import ConvexClientProvider from "./ConvexClientProvider";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html data-theme="synthwave">
+      <body>
+        <ConvexClientProvider>{children}</ConvexClientProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+A **nested layout** is where shared, area-specific UI goes — e.g. the app sidebar that should appear on `/dashboard`, `/budget/[id]`, and `/settings` but NOT on the marketing pages:
+
+```tsx
+// app/(app)/layout.tsx — wraps only the signed-in product
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex">
+      <Sidebar />                         {/* shown on every (app) page */}
+      <main className="flex-1">{children}</main>
+    </div>
+  );
+}
+```
+
+> **Rule:** If a piece of UI should appear on several pages of one area, it belongs in that area's `layout.tsx` — not copy-pasted into each `page.tsx`. (Law 3: Single Source of Truth, applied to layout.)
+
+### 15.7 `loading.tsx` & `error.tsx` — Two States You Get For Free
+
+These map directly onto the data states you already handle in Convex:
+
+| File | Handles | Relationship to Convex |
+|---|---|---|
+| `loading.tsx` | The **route** loading (navigation + server streaming) | Complements `useQuery() === undefined`. The route-level file covers the page shell; the `if (!data) return <Loading />` inside your client wrapper covers the live data. |
+| `error.tsx` | A **crash** in the segment (thrown error) | Catches errors thrown by your Convex functions (e.g. `throw new Error("Not authenticated")`) so the user sees a recovery UI instead of a white screen. |
+
+```tsx
+// app/(app)/budget/[id]/loading.tsx — instant, no props, shows during navigation
+export default function Loading() {
+  return (
+    <div className="flex justify-center items-center min-h-[400px]">
+      <span className="loading loading-spinner loading-lg text-primary" />
+    </div>
+  );
+}
+```
+
+```tsx
+// app/(app)/budget/[id]/error.tsx — MUST be a Client Component
+"use client";
+export default function Error({ reset }: { error: Error; reset: () => void }) {
+  return (
+    <div className="text-center p-10">
+      <p className="text-error font-semibold">Couldn't load this budget.</p>
+      <button className="btn btn-primary mt-4" onClick={reset}>Try again</button>
+    </div>
+  );
+}
+```
+
+### 15.8 Navigating Between Routes
+
+| Need | Use | Example |
+|---|---|---|
+| A link the user clicks | `<Link>` (never `<a>` for internal links) | `<Link href={`/budget/${id}`}>Open</Link>` |
+| Navigate from code (after a mutation) | `useRouter()` (Client Component only) | `router.push("/dashboard")` |
+| Send a 404 from a page/function | `notFound()` | `if (!budget) notFound();` |
+
+```tsx
+"use client";
+import { useRouter } from "next/navigation";   // ← App Router import, NOT "next/router"
+
+const router = useRouter();
+const create = useMutation(api.budgets.create);
+
+async function handleCreate() {
+  const id = await create({ name: "July 2026" });
+  router.push(`/budget/${id}`);   // jump straight to the new budget
+}
+```
+
+### 15.9 Protecting Routes (where auth lives)
+
+Two layers, used together:
+
+1. **Server gate (`middleware.ts` at the project root)** — redirects unauthenticated users away from `(app)` routes before the page even renders. This is your perimeter.
+2. **Function gate (Convex)** — every query/mutation still checks `ctx.auth.getUserIdentity()` (Section 8.10). **Never rely on routing alone for security** — the middleware improves UX, but the Convex auth check is what actually protects the data.
+
+```ts
+// middleware.ts (root) — pseudocode shape; exact API depends on your auth provider
+export function middleware(request) {
+  const isSignedIn = /* read auth cookie/token */;
+  const isProtected = request.nextUrl.pathname.startsWith("/dashboard")
+    || request.nextUrl.pathname.startsWith("/budget");
+  if (isProtected && !isSignedIn) {
+    return Response.redirect(new URL("/login", request.url));
+  }
+}
+```
+
+> Auth-provider tip: Clerk and Auth0 ship Next.js middleware helpers that do this for you. Whatever you use, the rule holds: **route protection is UX; the Convex `ctx.auth` check is the real lock.**
+
+### 15.10 The Routing Decision Template (use this every time)
+
+When you need a new screen, walk this tree:
+
+```
+I need a new screen. Where does it go?
+│
+├── Is it a page users visit, or an API endpoint?
+│   ├── API endpoint → app/api/<name>/route.ts
+│   └── Page → keep going ↓
+│
+├── Is it public (marketing) or signed-in (product)?
+│   ├── Public → app/(marketing)/<name>/page.tsx
+│   ├── Auth flow → app/(auth)/<name>/page.tsx
+│   └── Signed-in → app/(app)/<name>/page.tsx
+│
+├── Is there ONE of it, or one PER record?
+│   ├── One fixed page (e.g. /settings) → <name>/page.tsx
+│   └── One per record (e.g. a budget)  → <name>/[id]/page.tsx  (async params!)
+│
+├── Does it need live data?
+│   └── YES → thin page.tsx → "use client" wrapper (useQuery) → display components
+│            (the Section 14 pattern)
+│
+└── Does it share UI with sibling pages (sidebar, tabs)?
+    └── YES → put that UI in the area's layout.tsx, not each page
+```
+
+Then add, as needed:
+- `loading.tsx` if the data takes a beat to load
+- `error.tsx` if a thrown error should show a recovery UI (not a crash)
+
+### 15.11 The Universal Template (copy this into any project)
+
+Blank scaffold on the left, the BudgetEasy fill-in on the right. Rename the placeholders and you have a new app's routing in minutes.
+
+```
+TEMPLATE (any project)            →   BUDGETEASY (filled in)
+────────────────────────              ──────────────────────────
+app/                                  app/
+├── layout.tsx  (provider here)       ├── layout.tsx  (ConvexClientProvider)
+├── page.tsx    (landing)             ├── page.tsx    (marketing landing)
+│                                     │
+├── (marketing)/                      ├── (marketing)/
+│   └── <public-page>/page.tsx        │   ├── pricing/page.tsx
+│                                     │   └── faq/page.tsx
+│                                     │
+├── (app)/                            ├── (app)/
+│   ├── layout.tsx (app shell+auth)   │   ├── layout.tsx (sidebar + auth gate)
+│   ├── <list>/page.tsx               │   ├── dashboard/page.tsx
+│   └── <entity>/[id]/page.tsx        │   ├── budget/[id]/page.tsx
+│       ├── loading.tsx               │   │   ├── loading.tsx
+│       └── error.tsx                 │   │   └── error.tsx
+│                                     │   ├── transactions/page.tsx
+│                                     │   └── settings/page.tsx
+│                                     │
+├── (auth)/                           ├── (auth)/
+│   ├── login/page.tsx                │   ├── login/page.tsx
+│   └── signup/page.tsx               │   └── signup/page.tsx
+│                                     │
+├── api/<hook>/route.ts               ├── api/webhooks/route.ts
+└── not-found.tsx                     └── not-found.tsx
+
+middleware.ts  (route protection)     middleware.ts  (guards /dashboard, /budget)
+```
+
+**The four laws of routing (they never change):**
+1. **Folders are URLs; `page.tsx` makes a folder visitable.** No config files.
+2. **Group with `( )`, parametrize with `[ ]`, hide with `_`.**
+3. **Shared UI goes in `layout.tsx`; per-record UI goes in `[id]/page.tsx`.**
+4. **Pages stay thin** — they read the route param, hand it to a wrapper, and get out of the way (Section 14, Step 7).
 
 ---
 

@@ -18,6 +18,7 @@
 - **Architecture:** We follow strict Separation of Concerns. UI components (in `/components`) should be "dumb" and receive data via props. 
 - **Data Flow:** All static data currently originates from `config.tsx`. When building Convex queries, wrapper components or page files should fetch data and pass it down as props to UI components.
 - **Server/Client:** Default to Server Components. Only use `"use client"` when state (`useState`), browser APIs, or interactivity is explicitly required.
+- **Convex Functions:** Every public `query`/`mutation`/`action` must (1) validate both `args` AND `returns` with `v.` validators, and (2) call `ctx.auth.getUserIdentity()` and verify the record belongs to the user (`identity.subject`) before reading or writing. Use `.withIndex()` (not `.filter()`), pass the table name to `ctx.db.get/patch/delete`, and only call `internal.*` (never `api.*`) from server code.
 - **Workflow:** Ensure any new UI sections define their data contract (e.g., `export interface`) before building the presentational component.
 
 ## 4. NEVER DO (Hard Rules)
@@ -38,6 +39,13 @@
 - ❌ **Never use `useEffect` to fetch data on mount.** In Next.js, use Server Components or Convex's `useQuery()` — both handle data fetching without manual `useEffect` + loading state boilerplate.
 - ❌ **Never store derived data in state.** If a value can be computed from existing state or props, compute it inline. Don't `useState` it.
 - ❌ **Never mutate state directly.** Always use the setter function (`setX(newValue)`), never `x = newValue`.
+
+### Convex
+- ❌ **Never write a public function without `returns:` validators.** Both `args` AND `returns` must be defined — `args` protects the way in, `returns` protects the way out.
+- ❌ **Never skip the auth check.** Every public `query`/`mutation`/`action` must call `ctx.auth.getUserIdentity()` and verify ownership via `identity.subject` before touching data. Never trust a client-supplied ID alone, and never use a spoofable field (like email) for access control.
+- ❌ **Never use `.filter()` on a database query when an index exists.** Use `.withIndex()`. Define an index for every field you query by.
+- ❌ **Never call `Date.now()` inside a query** (it breaks caching/reactivity) — pass time as an argument or store a status field updated by a scheduled function.
+- ❌ **Never call `api.*` from server code.** Schedule and `ctx.run*` only `internal.*` functions.
 
 ### TypeScript
 - ❌ **Never use `any`.** If you don't know the type, use `unknown` and narrow it, or define a proper interface.
