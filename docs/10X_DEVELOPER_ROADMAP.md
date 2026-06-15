@@ -34,6 +34,23 @@ Every frontend application that has ever been built — from Facebook to a simpl
 DATA  →  LOGIC  →  PIXELS ON SCREEN
 ```
 
+However, as soon as you move from a *website* (like a static landing page) to a *web application* (like a SaaS dashboard), the arrow goes both ways. Modern UIs are not a one-way pipeline; they are a **continuous feedback loop**:
+
+```
+DATA  →  LOGIC  →  PIXELS  →  USER INPUT  →  DATA  →  ...
+```
+
+The user interacting with pixels is what changes the data, which rerenders the pixels. Managing that cycle without things going stale, inconsistent, or slow is where frontend complexity actually lives.
+
+**Zero-Based Budgeting Example:**
+Imagine an "Unallocated Funds" counter at the top of your app.
+1. **DATA → PIXELS**: You have $500 unallocated. The screen renders `$500`.
+2. **PIXELS → USER INPUT**: The user clicks an input field and allocates $100 to the "Groceries" category.
+3. **USER INPUT → DATA**: The app must deduct $100 from Unallocated and add $100 to Groceries in the database.
+4. **DATA → PIXELS**: The database updates, which instantly rerenders the Unallocated counter to `$400` and the Groceries counter to its new value.
+
+That feedback loop is exactly what modern tools (like React state and Convex mutations) are designed to handle elegantly.
+
 That's it. All of software engineering is about managing the journey from raw data to what the user sees and interacts with. The frameworks, the languages, the libraries — they are all just different vehicles for that same journey.
 
 This codebase teaches you to see that journey clearly. Once you see it, you cannot unsee it. And once you cannot unsee it, you can build anything.
